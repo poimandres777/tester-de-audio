@@ -11,6 +11,7 @@
             --neon-green: #00ff41;
             --neon-red: #ff003c;
             --neon-blue: #00e5ff;
+            --neon-yellow: #ffea00;
             --text-muted: #666666;
             --border-color: #222222;
         }
@@ -61,10 +62,12 @@
             padding: 15px;
             border: 1px solid var(--border-color);
             text-align: center; 
+            position: relative;
         }
-        .readout-value { font-size: 3.5rem; font-weight: bold; margin: 10px 0; }
+        .readout-value { font-size: 3rem; font-weight: bold; margin: 10px 0; }
         .readout-label { color: var(--text-muted); text-transform: uppercase; font-size: 0.85rem; letter-spacing: 1px; }
         .warning { color: var(--neon-red); }
+        .alert-freq { color: var(--neon-yellow); }
 
         .canvas-container {
             position: relative;
@@ -82,11 +85,12 @@
             text-transform: uppercase;
             background: rgba(0,0,0,0.7);
             padding: 2px 5px;
+            z-index: 10;
         }
 
         canvas {
             width: 100%;
-            height: 200px;
+            height: 220px; /* Un poco más alto para las etiquetas */
             display: block;
         }
 
@@ -156,14 +160,18 @@
                 <div class="readout-value" id="current-db">--</div>
             </div>
             <div class="readout-box">
-                <div class="readout-label">Pico Máximo (Max Peak)</div>
+                <div class="readout-label">Pico Máximo (SPL)</div>
                 <div class="readout-value" id="peak-db">--</div>
+            </div>
+            <div class="readout-box" style="border-color: var(--neon-yellow);">
+                <div class="readout-label">Frecuencia Dominante</div>
+                <div class="readout-value alert-freq" id="dom-freq">-- Hz</div>
             </div>
         </div>
 
         <!-- Gráfico de Espectro de Frecuencias -->
         <div class="canvas-container">
-            <div class="canvas-title">Espectro de Frecuencias (FFT) + Peak Hold</div>
+            <div class="canvas-title">Espectro (FFT) + Detector de Picos</div>
             <canvas id="spectrumCanvas"></canvas>
         </div>
 
@@ -181,7 +189,7 @@
             </div>
 
             <div class="control-group">
-                <label>Muestreo (Response):</label>
+                <label>Muestreo:</label>
                 <button class="btn active" id="btn-fast">Fast</button>
                 <button class="btn" id="btn-slow">Slow</button>
             </div>
@@ -199,15 +207,14 @@
         let isRunning = false;
 
         // Configuraciones de Audio
-        const fftSize = 4096; // Alta resolución de frecuencias
+        const fftSize = 4096; // Alta resolución
         let timeDataArray, freqDataArray, peakFreqArray;
         let dbHistory = [];
         const maxHistoryLength = 300;
         let peakDB = -Infinity;
         let smoothedRMS = 0;
+        let sampleRate = 44100; // Por defecto, se actualizará al iniciar
 
-        // Constantes de Muestreo (Filtro de media móvil exponencial)
-        // Fast reacciona rápido a transitorios, Slow hace un promedio más largo
         const RESPONSE_FAST = 0.8; 
         const RESPONSE_SLOW = 0.1;
         let currentResponse = RESPONSE_FAST;
@@ -221,6 +228,7 @@
         const statusEl = document.getElementById('status');
         const currentDbEl = document.getElementById('current-db');
         const peakDbEl = document.getElementById('peak-db');
+        const domFreqEl = document.getElementById('dom-freq');
         const slider = document.getElementById('offset-slider');
         const offsetVal = document.getElementById('offset-val');
         
@@ -235,12 +243,11 @@
             historyCanvas.width = width;
             historyCanvas.height = 200;
             spectrumCanvas.width = width;
-            spectrumCanvas.height = 200;
+            spectrumCanvas.height = 220; // Espacio extra abajo para textos
         }
         window.addEventListener('resize', resizeCanvases);
         resizeCanvases();
 
-        // Controles de Interfaz
         let calibrationOffset = parseInt(slider.value);
         slider.addEventListener('input', (e) => {
             calibrationOffset = parseInt(e.target.value);
@@ -251,7 +258,7 @@
             peakDB = -Infinity;
             peakDbEl.innerText = '--';
             peakDbEl.classList.remove('warning');
-            if(peakFreqArray) peakFreqArray.fill(0); // Resetear picos del espectro
+            if(peakFreqArray) peakFreqArray.fill(0);
         });
 
         btnFast.addEventListener('click', () => {
@@ -273,6 +280,8 @@
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
                 
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                sampleRate = audioContext.sampleRate; // Obtener Sample Rate real de la interfaz
+                
                 mediaStreamSource = audioContext.createMediaStreamSource(stream);
                 analyser = audioContext.createAnalyser();
                 
@@ -296,7 +305,7 @@
                 
             } catch (err) {
                 console.error('Error:', err);
-                alert('Permiso de micrófono denegado. Asegúrate de estar en HTTPS y permitir el acceso.');
+                alert('Permiso de micrófono denegado. Asegúrate de estar en HTTPS.');
             }
         }
 
@@ -314,15 +323,13 @@
         function updateRoutine() {
             if (!isRunning) return;
 
-            // 1. OBTENER Y CALCULAR RMS (Nivel SPL)
+            // --- 1. SPL RMS ---
             analyser.getFloatTimeDomainData(timeDataArray);
             let sumSquares = 0.0;
             for (let i = 0; i < timeDataArray.length; i++) {
                 sumSquares += timeDataArray[i] * timeDataArray[i];
             }
             let currentRMS = Math.sqrt(sumSquares / timeDataArray.length);
-            
-            // Aplicar suavizado según la opción Fast/Slow
             smoothedRMS = (currentRMS * currentResponse) + (smoothedRMS * (1 - currentResponse));
 
             let dbValue = 0;
@@ -330,10 +337,8 @@
                 dbValue = 20 * Math.log10(smoothedRMS) + calibrationOffset;
             }
             if (dbValue < 0) dbValue = 0;
-
             if (dbValue > peakDB) peakDB = dbValue;
 
-            // Actualizar Textos
             currentDbEl.innerText = dbValue.toFixed(1);
             peakDbEl.innerText = peakDB.toFixed(1);
             
@@ -341,12 +346,42 @@
             else currentDbEl.classList.remove('warning');
             if (peakDB > 95) peakDbEl.classList.add('warning');
 
-            // Actualizar Historial SPL
             dbHistory.push(dbValue);
             if (dbHistory.length > maxHistoryLength) dbHistory.shift();
 
-            // 2. OBTENER DATOS DE FRECUENCIA (Espectrómetro)
+            // --- 2. FFT FRECUENCIAS Y CAZADOR DE ACOPLES ---
             analyser.getByteFrequencyData(freqDataArray);
+            
+            let maxFreqVal = 0;
+            let dominantIndex = 0;
+            
+            // Buscar la banda con la señal más fuerte
+            for (let i = 0; i < analyser.frequencyBinCount; i++) {
+                if (freqDataArray[i] > maxFreqVal) {
+                    maxFreqVal = freqDataArray[i];
+                    dominantIndex = i;
+                }
+            }
+
+            // Calcular Hz reales: Frecuencia = (Indice * Frecuencia de Muestreo) / FFT Size
+            const binSize = sampleRate / fftSize;
+            const dominantFrequency = dominantIndex * binSize;
+
+            // Actualizar interfaz solo si hay sonido significativo (para evitar leer ruido de fondo)
+            if (maxFreqVal > 50) { 
+                domFreqEl.innerText = Math.round(dominantFrequency) + " Hz";
+                if (maxFreqVal > 220) { // Si satura, poner rojo
+                    domFreqEl.classList.remove('alert-freq');
+                    domFreqEl.classList.add('warning');
+                } else {
+                    domFreqEl.classList.add('alert-freq');
+                    domFreqEl.classList.remove('warning');
+                }
+            } else {
+                domFreqEl.innerText = "-- Hz";
+                domFreqEl.classList.remove('warning');
+                domFreqEl.classList.add('alert-freq');
+            }
 
             drawHistory();
             drawSpectrum();
@@ -359,7 +394,6 @@
             histCtx.fillRect(0, 0, historyCanvas.width, historyCanvas.height);
             if (dbHistory.length === 0) return;
 
-            // Cuadrícula
             histCtx.strokeStyle = '#222';
             histCtx.lineWidth = 1;
             histCtx.beginPath();
@@ -377,10 +411,8 @@
             for (let i = 0; i < dbHistory.length; i++) {
                 const db = dbHistory[i];
                 const y = historyCanvas.height - (db / 130) * historyCanvas.height;
-                
                 if (i === 0) histCtx.moveTo(x, y);
                 else histCtx.lineTo(x, y);
-
                 histCtx.strokeStyle = db > 95 ? 'var(--neon-red)' : 'var(--neon-green)';
                 x += sliceWidth;
             }
@@ -391,42 +423,67 @@
             specCtx.fillStyle = '#000';
             specCtx.fillRect(0, 0, spectrumCanvas.width, spectrumCanvas.height);
             
-            // Limitamos a las frecuencias útiles para no dibujar espacio vacío al final (hasta aprox 16-20kHz)
-            const binCount = Math.floor(analyser.frequencyBinCount * 0.8); 
+            const binCount = Math.floor(analyser.frequencyBinCount * 0.7); // Renderizar hasta ~15kHz
             const barWidth = spectrumCanvas.width / binCount;
             let x = 0;
+            
+            // Área de dibujo (dejamos 20px abajo para texto)
+            const graphHeight = spectrumCanvas.height - 20;
 
             for (let i = 0; i < binCount; i++) {
                 const value = freqDataArray[i];
                 
-                // Actualizar Peak Hold (Retención de picos)
-                if (value > peakFreqArray[i]) {
-                    peakFreqArray[i] = value;
-                } else {
-                    // Decaimiento lento del pico (efecto gravedad)
-                    peakFreqArray[i] = Math.max(0, peakFreqArray[i] - 1.5);
-                }
+                if (value > peakFreqArray[i]) peakFreqArray[i] = value;
+                else peakFreqArray[i] = Math.max(0, peakFreqArray[i] - 1.5);
 
-                // Dibujar banda actual (Azul neón / Verde según intensidad)
                 const percent = value / 255;
-                const height = percent * spectrumCanvas.height;
-                const y = spectrumCanvas.height - height;
+                const height = percent * graphHeight;
+                const y = graphHeight - height;
                 
-                // Color degradado dependiendo de la amplitud
-                specCtx.fillStyle = value > 210 ? 'var(--neon-red)' : 'var(--neon-green)';
-                specCtx.globalAlpha = 0.7;
+                specCtx.fillStyle = value > 220 ? 'var(--neon-red)' : 'var(--neon-green)';
+                specCtx.globalAlpha = 0.8;
                 specCtx.fillRect(x, y, barWidth > 1 ? barWidth - 0.5 : 1, height);
                 specCtx.globalAlpha = 1.0;
 
-                // Dibujar línea de Peak Hold (Punto flotante superior)
                 const peakPercent = peakFreqArray[i] / 255;
-                const peakY = spectrumCanvas.height - (peakPercent * spectrumCanvas.height);
-                
+                const peakY = graphHeight - (peakPercent * graphHeight);
                 specCtx.fillStyle = 'var(--neon-blue)';
                 specCtx.fillRect(x, peakY, barWidth > 1 ? barWidth - 0.5 : 1, 2);
 
                 x += barWidth;
             }
+
+            // --- DIBUJAR MARCADORES DE FRECUENCIA (Eje X) ---
+            specCtx.fillStyle = '#666';
+            specCtx.font = '10px Courier New';
+            specCtx.textAlign = 'center';
+            
+            // Calcular cuantas frecuencias abarca el ancho total del canvas
+            const maxDisplayFreq = binCount * (sampleRate / fftSize);
+            
+            // Frecuencias de referencia a marcar
+            const referenceFreqs = [250, 1000, 3000, 5000, 10000];
+            const labels = ['250Hz', '1kHz', '3kHz', '5kHz', '10kHz'];
+
+            specCtx.beginPath();
+            specCtx.strokeStyle = '#333';
+            specCtx.lineWidth = 1;
+
+            for(let j=0; j<referenceFreqs.length; j++) {
+                let freq = referenceFreqs[j];
+                // Posición X = (Frecuencia objetivo / Frecuencia máxima visible) * Ancho
+                let posX = (freq / maxDisplayFreq) * spectrumCanvas.width;
+                
+                if (posX < spectrumCanvas.width) {
+                    // Linea vertical tenue
+                    specCtx.moveTo(posX, 0);
+                    specCtx.lineTo(posX, graphHeight);
+                    
+                    // Texto
+                    specCtx.fillText(labels[j], posX, spectrumCanvas.height - 5);
+                }
+            }
+            specCtx.stroke();
         }
 
         btnStart.addEventListener('click', initAudio);
