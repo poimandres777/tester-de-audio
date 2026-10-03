@@ -3,320 +3,437 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simulador de Especialidades - Ingeniería en Sonido</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <title>Live Audio Analyzer | P.2050</title>
     <style>
         :root {
-            --refuerzo-color: #FF6B6B;
-            --acustica-color: #FFD93D;
-            --desarrollo-color: #4D96FF;
-            --bg-color: #f4f7f6;
-            --card-bg: #ffffff;
-            --text-main: #2c3e50;
+            --bg-color: #050505;
+            --panel-bg: #111111;
+            --neon-green: #00ff41;
+            --neon-red: #ff003c;
+            --neon-blue: #00e5ff;
+            --text-muted: #666666;
+            --border-color: #222222;
         }
+
+        * { box-sizing: border-box; }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: var(--bg-color);
-            color: var(--text-main);
-            margin: 0;
-            padding: 20px;
-        }
-
-        h1 {
-            text-align: center;
-            margin-bottom: 30px;
-            font-size: 2.5em;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        /* Sección de Votación */
-        .votacion-container {
+            color: var(--neon-green);
+            font-family: 'Courier New', Courier, monospace;
             display: flex;
-            justify-content: center;
-            gap: 20px;
-            margin-bottom: 40px;
-            flex-wrap: wrap;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            margin: 0;
+            min-height: 100vh;
         }
 
-        button {
-            padding: 15px 30px;
-            font-size: 1.1em;
-            font-weight: bold;
-            color: #1a1a1a;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        .dashboard {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            padding: 20px;
+            width: 100%;
+            max-width: 1000px;
+            box-shadow: 0 0 20px rgba(0, 255, 65, 0.05);
         }
 
-        button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
-        }
-
-        .btn-refuerzo { background-color: var(--refuerzo-color); color: white; }
-        .btn-acustica { background-color: var(--acustica-color); }
-        .btn-desarrollo { background-color: var(--desarrollo-color); color: white; }
-        .btn-reset { background-color: #95a5a6; color: white; margin-top: 20px;}
-
-        /* Grid del Dashboard */
-        .dashboard-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-
-        .card {
-            background-color: var(--card-bg);
-            padding: 25px;
-            border-radius: 12px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-        }
-
-        .card h2 {
-            margin-top: 0;
-            font-size: 1.4em;
-            border-bottom: 2px solid var(--bg-color);
-            padding-bottom: 10px;
-            margin-bottom: 20px;
-        }
-
-        /* Texto y Datos */
-        .datos-lista {
-            list-style: none;
-            padding: 0;
-            font-size: 1.2em;
-        }
-        
-        .datos-lista li {
-            margin-bottom: 10px;
+        .header {
             display: flex;
             justify-content: space-between;
-            border-bottom: 1px dashed #ccc;
-            padding-bottom: 5px;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 15px;
+            margin-bottom: 20px;
         }
 
-        .interpretacion-texto {
-            font-size: 1.1em;
-            line-height: 1.6;
-            text-align: justify;
+        h1 { margin: 0; font-size: 1.5rem; letter-spacing: 2px; text-transform: uppercase; }
+        
+        .readouts {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
         }
 
-        /* Contenedores de Gráficos */
-        .chart-container {
+        .readout-box { 
+            background: #000;
+            padding: 15px;
+            border: 1px solid var(--border-color);
+            text-align: center; 
+        }
+        .readout-value { font-size: 3.5rem; font-weight: bold; margin: 10px 0; }
+        .readout-label { color: var(--text-muted); text-transform: uppercase; font-size: 0.85rem; letter-spacing: 1px; }
+        .warning { color: var(--neon-red); }
+
+        .canvas-container {
             position: relative;
-            height: 300px;
-            width: 100%;
+            margin-bottom: 20px;
+            background: #000;
+            border: 1px solid var(--border-color);
         }
 
-        .chart-container.large {
-            height: 400px;
+        .canvas-title {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            background: rgba(0,0,0,0.7);
+            padding: 2px 5px;
+        }
+
+        canvas {
+            width: 100%;
+            height: 200px;
+            display: block;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+            background: #000;
+            padding: 15px;
+            border: 1px solid var(--border-color);
+        }
+
+        .btn {
+            background: transparent;
+            color: var(--neon-green);
+            border: 1px solid var(--neon-green);
+            padding: 8px 20px;
+            font-family: inherit;
+            font-weight: bold;
+            font-size: 0.9rem;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: all 0.2s;
+        }
+
+        .btn:hover:not(:disabled), .btn.active { background: var(--neon-green); color: #000; }
+        .btn:disabled { border-color: var(--text-muted); color: var(--text-muted); cursor: not-allowed; }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .control-group label { color: var(--text-muted); font-size: 0.9rem; text-transform: uppercase; }
+        
+        input[type=range] {
+            -webkit-appearance: none;
+            background: var(--border-color);
+            height: 4px;
+            outline: none;
+            width: 150px;
+        }
+        
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 15px;
+            height: 15px;
+            background: var(--neon-green);
+            cursor: pointer;
         }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <h1>Dashboard de Especialidades en Sonido</h1>
-
-    <div class="votacion-container">
-        <button class="btn-refuerzo" onclick="votar('Refuerzo')">Votar: Refuerzo Sonoro</button>
-        <button class="btn-acustica" onclick="votar('Acustica')">Votar: Acústica</button>
-        <button class="btn-desarrollo" onclick="votar('Desarrollo')">Votar: Desarrollo HW/SW</button>
-    </div>
-
-    <div class="dashboard-grid">
-        <div class="card">
-            <h2>Datos Acumulados</h2>
-            <ul class="datos-lista">
-                <li><span>Refuerzo Sonoro:</span> <strong id="dato-refuerzo">0</strong></li>
-                <li><span>Acústica / Electroacústica:</span> <strong id="dato-acustica">0</strong></li>
-                <li><span>Desarrollo (Soft/Hard):</span> <strong id="dato-desarrollo">0</strong></li>
-                <li style="border-top: 2px solid #333; margin-top: 15px; padding-top: 10px;">
-                    <span><strong>Total de Votos:</strong></span> <strong id="dato-total">0</strong>
-                </li>
-            </ul>
+    <div class="dashboard">
+        <div class="header">
+            <h1>SYS.AUDIO_ANALYZER // LIVE</h1>
+            <span id="status" style="color: var(--text-muted)">[ OFFLINE ]</span>
         </div>
 
-        <div class="card">
-            <h2>Interpretación Analítica</h2>
-            <p class="interpretacion-texto" id="texto-interpretacion">
-                Esperando datos para generar el análisis...
-            </p>
-        </div>
-    </div>
-
-    <div class="dashboard-grid">
-        <div class="card">
-            <h2>Volumen Absoluto (Barras)</h2>
-            <div class="chart-container large">
-                <canvas id="barChart"></canvas>
+        <div class="readouts">
+            <div class="readout-box">
+                <div class="readout-label">Nivel Actual (RMS)</div>
+                <div class="readout-value" id="current-db">--</div>
+            </div>
+            <div class="readout-box">
+                <div class="readout-label">Pico Máximo (Max Peak)</div>
+                <div class="readout-value" id="peak-db">--</div>
             </div>
         </div>
 
-        <div class="card">
-            <h2>Distribución Proporcional (Pastel)</h2>
-            <div class="chart-container large">
-                <canvas id="pieChart"></canvas>
+        <!-- Gráfico de Espectro de Frecuencias -->
+        <div class="canvas-container">
+            <div class="canvas-title">Espectro de Frecuencias (FFT) + Peak Hold</div>
+            <canvas id="spectrumCanvas"></canvas>
+        </div>
+
+        <!-- Gráfico de Historial SPL -->
+        <div class="canvas-container">
+            <div class="canvas-title">Historial SPL (Tiempo Real)</div>
+            <canvas id="historyCanvas"></canvas>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <button class="btn" id="btn-start">Iniciar</button>
+                <button class="btn" id="btn-stop" disabled>Detener</button>
+                <button class="btn" id="btn-reset">Reset Peaks</button>
+            </div>
+
+            <div class="control-group">
+                <label>Muestreo (Response):</label>
+                <button class="btn active" id="btn-fast">Fast</button>
+                <button class="btn" id="btn-slow">Slow</button>
+            </div>
+            
+            <div class="control-group">
+                <label for="offset-slider">Calibración (+dB):</label>
+                <input type="range" id="offset-slider" min="50" max="150" value="100">
+                <span id="offset-val" style="color: var(--neon-green)">100</span>
             </div>
         </div>
     </div>
 
-    <div class="dashboard-grid" style="grid-template-columns: 1fr; max-width: 600px; margin: 0 auto;">
-        <div class="card">
-            <h2>Magnitud de Saturación (Área Polar)</h2>
-            <div class="chart-container">
-                <canvas id="polarChart"></canvas>
-            </div>
-        </div>
-    </div>
-    
-    <div style="text-align: center;">
-        <button class="btn-reset" onclick="reiniciarDatos()">Reiniciar Todos los Datos</button>
-    </div>
-</div>
+    <script>
+        let audioContext, mediaStreamSource, analyser, animationId;
+        let isRunning = false;
 
-<script>
-    // Variables Globales de Votos (Persistencia)
-    let votos = {
-        Refuerzo: parseInt(localStorage.getItem('votosRefuerzo')) || 0,
-        Acustica: parseInt(localStorage.getItem('votosAcustica')) || 0,
-        Desarrollo: parseInt(localStorage.getItem('votosDesarrollo')) || 0
-    };
+        // Configuraciones de Audio
+        const fftSize = 4096; // Alta resolución de frecuencias
+        let timeDataArray, freqDataArray, peakFreqArray;
+        let dbHistory = [];
+        const maxHistoryLength = 300;
+        let peakDB = -Infinity;
+        let smoothedRMS = 0;
 
-    // Referencias a los Gráficos
-    let barChart, pieChart, polarChart;
+        // Constantes de Muestreo (Filtro de media móvil exponencial)
+        // Fast reacciona rápido a transitorios, Slow hace un promedio más largo
+        const RESPONSE_FAST = 0.8; 
+        const RESPONSE_SLOW = 0.1;
+        let currentResponse = RESPONSE_FAST;
 
-    // Colores globales
-    const colores = ['#FF6B6B', '#FFD93D', '#4D96FF'];
-    const bordes = ['#c0392b', '#f39c12', '#2980b9'];
-    const etiquetas = ['Refuerzo Sonoro', 'Acústica', 'Desarrollo SW/HW'];
-
-    // Inicialización al cargar la página
-    window.onload = function() {
-        inicializarGraficos();
-        actualizarInterfaz();
-    };
-
-    // Función para registrar un voto
-    function votar(especialidad) {
-        votos[especialidad]++;
-        localStorage.setItem(`votos${especialidad}`, votos[especialidad]);
-        actualizarInterfaz();
-    }
-
-    // Función para reiniciar
-    function reiniciarDatos() {
-        if(confirm("¿Estás seguro de que quieres borrar todos los votos?")) {
-            votos = { Refuerzo: 0, Acustica: 0, Desarrollo: 0 };
-            localStorage.clear();
-            actualizarInterfaz();
+        // Elementos DOM
+        const btnStart = document.getElementById('btn-start');
+        const btnStop = document.getElementById('btn-stop');
+        const btnReset = document.getElementById('btn-reset');
+        const btnFast = document.getElementById('btn-fast');
+        const btnSlow = document.getElementById('btn-slow');
+        const statusEl = document.getElementById('status');
+        const currentDbEl = document.getElementById('current-db');
+        const peakDbEl = document.getElementById('peak-db');
+        const slider = document.getElementById('offset-slider');
+        const offsetVal = document.getElementById('offset-val');
+        
+        // Canvas Setup
+        const historyCanvas = document.getElementById('historyCanvas');
+        const histCtx = historyCanvas.getContext('2d');
+        const spectrumCanvas = document.getElementById('spectrumCanvas');
+        const specCtx = spectrumCanvas.getContext('2d');
+        
+        function resizeCanvases() {
+            const width = historyCanvas.parentElement.clientWidth;
+            historyCanvas.width = width;
+            historyCanvas.height = 200;
+            spectrumCanvas.width = width;
+            spectrumCanvas.height = 200;
         }
-    }
+        window.addEventListener('resize', resizeCanvases);
+        resizeCanvases();
 
-    // Función Central para actualizar toda la UI
-    function actualizarInterfaz() {
-        const dataArr = [votos.Refuerzo, votos.Acustica, votos.Desarrollo];
-        const total = dataArr.reduce((a, b) => a + b, 0);
-
-        // 1. Actualizar Textos Numéricos
-        document.getElementById('dato-refuerzo').innerText = votos.Refuerzo;
-        document.getElementById('dato-acustica').innerText = votos.Acustica;
-        document.getElementById('dato-desarrollo').innerText = votos.Desarrollo;
-        document.getElementById('dato-total').innerText = total;
-
-        // 2. Actualizar Gráficos
-        [barChart, pieChart, polarChart].forEach(chart => {
-            chart.data.datasets[0].data = dataArr;
-            chart.update();
+        // Controles de Interfaz
+        let calibrationOffset = parseInt(slider.value);
+        slider.addEventListener('input', (e) => {
+            calibrationOffset = parseInt(e.target.value);
+            offsetVal.innerText = calibrationOffset;
         });
 
-        // 3. Generar Interpretación Escrita Dinámica
-        generarInterpretacion(total);
-    }
+        btnReset.addEventListener('click', () => {
+            peakDB = -Infinity;
+            peakDbEl.innerText = '--';
+            peakDbEl.classList.remove('warning');
+            if(peakFreqArray) peakFreqArray.fill(0); // Resetear picos del espectro
+        });
 
-    // Lógica para redactar el análisis
-    function generarInterpretacion(total) {
-        const textoDiv = document.getElementById('texto-interpretacion');
-        
-        if (total === 0) {
-            textoDiv.innerHTML = "<em>El sistema está a la espera de los primeros votos para comenzar el cálculo probabilístico.</em>";
-            return;
-        }
+        btnFast.addEventListener('click', () => {
+            currentResponse = RESPONSE_FAST;
+            btnFast.classList.add('active');
+            btnSlow.classList.remove('active');
+            if (analyser) analyser.smoothingTimeConstant = 0.2;
+        });
 
-        // Crear un array de objetos para ordenar fácilmente
-        let stats = [
-            { nombre: 'Refuerzo Sonoro', cantidad: votos.Refuerzo },
-            { nombre: 'Acústica', cantidad: votos.Acustica },
-            { nombre: 'Desarrollo de Hardware y Software', cantidad: votos.Desarrollo }
-        ];
+        btnSlow.addEventListener('click', () => {
+            currentResponse = RESPONSE_SLOW;
+            btnSlow.classList.add('active');
+            btnFast.classList.remove('active');
+            if (analyser) analyser.smoothingTimeConstant = 0.8;
+        });
 
-        // Ordenar de mayor a menor
-        stats.sort((a, b) => b.cantidad - a.cantidad);
-
-        const mayor = stats[0];
-        const menor = stats[2];
-        const intermedio = stats[1];
-
-        let analisis = `Con una cohorte actual de <strong>${total}</strong> participaciones registradas, observamos una clara tendencia. `;
-        
-        analisis += `La especialidad con <strong>mayor demanda</strong> es <strong>${mayor.nombre}</strong> con ${mayor.cantidad} votos, `;
-        analisis += `lo que confirma la hipótesis de saturación en áreas de alta visibilidad. `;
-        
-        analisis += `<br><br>Por otro lado, la especialidad <strong>menos explorada</strong> es <strong>${menor.nombre}</strong> con apenas ${menor.cantidad} votos, evidenciando el déficit técnico mencionado en la investigación. `;
-        
-        analisis += `El área de ${intermedio.nombre} se mantiene como una opción intermedia con ${intermedio.cantidad} interesados.`;
-
-        // Caso de empates (opcional para hacerlo más robusto)
-        if (mayor.cantidad === menor.cantidad) {
-            analisis = `Actualmente existe un equilibrio perfecto en la muestra, con ${total} votos distribuidos uniformemente entre las ramas. Se requieren más datos para definir una tendencia.`;
+        async function initAudio() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                mediaStreamSource = audioContext.createMediaStreamSource(stream);
+                analyser = audioContext.createAnalyser();
+                
+                analyser.fftSize = fftSize;
+                analyser.smoothingTimeConstant = currentResponse === RESPONSE_FAST ? 0.2 : 0.8;
+                
+                mediaStreamSource.connect(analyser);
+                
+                timeDataArray = new Float32Array(analyser.fftSize);
+                freqDataArray = new Uint8Array(analyser.frequencyBinCount);
+                peakFreqArray = new Uint8Array(analyser.frequencyBinCount);
+                
+                isRunning = true;
+                statusEl.innerText = '[ ONLINE / TRACKING ]';
+                statusEl.style.color = 'var(--neon-green)';
+                
+                btnStart.disabled = true;
+                btnStop.disabled = false;
+                
+                updateRoutine();
+                
+            } catch (err) {
+                console.error('Error:', err);
+                alert('Permiso de micrófono denegado. Asegúrate de estar en HTTPS y permitir el acceso.');
+            }
         }
 
-        textoDiv.innerHTML = analisis;
-    }
+        function stopAudio() {
+            if (audioContext) audioContext.close();
+            cancelAnimationFrame(animationId);
+            isRunning = false;
+            
+            statusEl.innerText = '[ OFFLINE ]';
+            statusEl.style.color = 'var(--text-muted)';
+            btnStart.disabled = false;
+            btnStop.disabled = true;
+        }
 
-    // Configuración Inicial de Chart.js
-    function inicializarGraficos() {
-        const ctxBar = document.getElementById('barChart').getContext('2d');
-        const ctxPie = document.getElementById('pieChart').getContext('2d');
-        const ctxPolar = document.getElementById('polarChart').getContext('2d');
+        function updateRoutine() {
+            if (!isRunning) return;
 
-        const configBase = {
-            labels: etiquetas,
-            datasets: [{
-                data: [0, 0, 0],
-                backgroundColor: colores,
-                borderColor: bordes,
-                borderWidth: 1
-            }]
-        };
+            // 1. OBTENER Y CALCULAR RMS (Nivel SPL)
+            analyser.getFloatTimeDomainData(timeDataArray);
+            let sumSquares = 0.0;
+            for (let i = 0; i < timeDataArray.length; i++) {
+                sumSquares += timeDataArray[i] * timeDataArray[i];
+            }
+            let currentRMS = Math.sqrt(sumSquares / timeDataArray.length);
+            
+            // Aplicar suavizado según la opción Fast/Slow
+            smoothedRMS = (currentRMS * currentResponse) + (smoothedRMS * (1 - currentResponse));
 
-        barChart = new Chart(ctxBar, {
-            type: 'bar',
-            data: JSON.parse(JSON.stringify(configBase)),
-            options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } }
-        });
+            let dbValue = 0;
+            if (smoothedRMS > 0) {
+                dbValue = 20 * Math.log10(smoothedRMS) + calibrationOffset;
+            }
+            if (dbValue < 0) dbValue = 0;
 
-        pieChart = new Chart(ctxPie, {
-            type: 'pie',
-            data: JSON.parse(JSON.stringify(configBase)),
-            options: { responsive: true, maintainAspectRatio: false }
-        });
+            if (dbValue > peakDB) peakDB = dbValue;
 
-        polarChart = new Chart(ctxPolar, {
-            type: 'polarArea',
-            data: JSON.parse(JSON.stringify(configBase)),
-            options: { responsive: true, maintainAspectRatio: false }
-        });
-    }
-</script>
+            // Actualizar Textos
+            currentDbEl.innerText = dbValue.toFixed(1);
+            peakDbEl.innerText = peakDB.toFixed(1);
+            
+            if (dbValue > 95) currentDbEl.classList.add('warning');
+            else currentDbEl.classList.remove('warning');
+            if (peakDB > 95) peakDbEl.classList.add('warning');
 
+            // Actualizar Historial SPL
+            dbHistory.push(dbValue);
+            if (dbHistory.length > maxHistoryLength) dbHistory.shift();
+
+            // 2. OBTENER DATOS DE FRECUENCIA (Espectrómetro)
+            analyser.getByteFrequencyData(freqDataArray);
+
+            drawHistory();
+            drawSpectrum();
+
+            animationId = requestAnimationFrame(updateRoutine);
+        }
+
+        function drawHistory() {
+            histCtx.fillStyle = '#000';
+            histCtx.fillRect(0, 0, historyCanvas.width, historyCanvas.height);
+            if (dbHistory.length === 0) return;
+
+            // Cuadrícula
+            histCtx.strokeStyle = '#222';
+            histCtx.lineWidth = 1;
+            histCtx.beginPath();
+            for (let i = 0; i < historyCanvas.height; i += 40) {
+                histCtx.moveTo(0, i);
+                histCtx.lineTo(historyCanvas.width, i);
+            }
+            histCtx.stroke();
+
+            histCtx.beginPath();
+            histCtx.lineWidth = 2;
+            const sliceWidth = historyCanvas.width / maxHistoryLength;
+            let x = 0;
+
+            for (let i = 0; i < dbHistory.length; i++) {
+                const db = dbHistory[i];
+                const y = historyCanvas.height - (db / 130) * historyCanvas.height;
+                
+                if (i === 0) histCtx.moveTo(x, y);
+                else histCtx.lineTo(x, y);
+
+                histCtx.strokeStyle = db > 95 ? 'var(--neon-red)' : 'var(--neon-green)';
+                x += sliceWidth;
+            }
+            histCtx.stroke();
+        }
+
+        function drawSpectrum() {
+            specCtx.fillStyle = '#000';
+            specCtx.fillRect(0, 0, spectrumCanvas.width, spectrumCanvas.height);
+            
+            // Limitamos a las frecuencias útiles para no dibujar espacio vacío al final (hasta aprox 16-20kHz)
+            const binCount = Math.floor(analyser.frequencyBinCount * 0.8); 
+            const barWidth = spectrumCanvas.width / binCount;
+            let x = 0;
+
+            for (let i = 0; i < binCount; i++) {
+                const value = freqDataArray[i];
+                
+                // Actualizar Peak Hold (Retención de picos)
+                if (value > peakFreqArray[i]) {
+                    peakFreqArray[i] = value;
+                } else {
+                    // Decaimiento lento del pico (efecto gravedad)
+                    peakFreqArray[i] = Math.max(0, peakFreqArray[i] - 1.5);
+                }
+
+                // Dibujar banda actual (Azul neón / Verde según intensidad)
+                const percent = value / 255;
+                const height = percent * spectrumCanvas.height;
+                const y = spectrumCanvas.height - height;
+                
+                // Color degradado dependiendo de la amplitud
+                specCtx.fillStyle = value > 210 ? 'var(--neon-red)' : 'var(--neon-green)';
+                specCtx.globalAlpha = 0.7;
+                specCtx.fillRect(x, y, barWidth > 1 ? barWidth - 0.5 : 1, height);
+                specCtx.globalAlpha = 1.0;
+
+                // Dibujar línea de Peak Hold (Punto flotante superior)
+                const peakPercent = peakFreqArray[i] / 255;
+                const peakY = spectrumCanvas.height - (peakPercent * spectrumCanvas.height);
+                
+                specCtx.fillStyle = 'var(--neon-blue)';
+                specCtx.fillRect(x, peakY, barWidth > 1 ? barWidth - 0.5 : 1, 2);
+
+                x += barWidth;
+            }
+        }
+
+        btnStart.addEventListener('click', initAudio);
+        btnStop.addEventListener('click', stopAudio);
+        
+        drawHistory();
+        drawSpectrum();
+    </script>
 </body>
 </html>
