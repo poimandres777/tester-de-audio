@@ -90,7 +90,7 @@
 
         canvas {
             width: 100%;
-            height: 220px; /* Un poco más alto para las etiquetas */
+            height: 250px; 
             display: block;
         }
 
@@ -150,52 +150,42 @@
 
     <div class="dashboard">
         <div class="header">
-            <h1>SYS.AUDIO_ANALYZER // LIVE</h1>
+            <h1>SYS.AUDIO_ANALYZER // LOG RTA (PRO)</h1>
             <span id="status" style="color: var(--text-muted)">[ OFFLINE ]</span>
         </div>
 
         <div class="readouts">
             <div class="readout-box">
-                <div class="readout-label">Nivel Actual (RMS)</div>
+                <div class="readout-label">Nivel RMS (SPL)</div>
                 <div class="readout-value" id="current-db">--</div>
             </div>
-            <div class="readout-box">
-                <div class="readout-label">Pico Máximo (SPL)</div>
-                <div class="readout-value" id="peak-db">--</div>
-            </div>
             <div class="readout-box" style="border-color: var(--neon-yellow);">
-                <div class="readout-label">Frecuencia Dominante</div>
+                <div class="readout-label">Pico Problemático (Feedback)</div>
                 <div class="readout-value alert-freq" id="dom-freq">-- Hz</div>
             </div>
         </div>
 
-        <!-- Gráfico de Espectro de Frecuencias -->
+        <!-- RTA Logarítmico Optimizado -->
         <div class="canvas-container">
-            <div class="canvas-title">Espectro (FFT) + Detector de Picos</div>
+            <div class="canvas-title">RTA Logarítmico (20Hz - 20kHz)</div>
             <canvas id="spectrumCanvas"></canvas>
-        </div>
-
-        <!-- Gráfico de Historial SPL -->
-        <div class="canvas-container">
-            <div class="canvas-title">Historial SPL (Tiempo Real)</div>
-            <canvas id="historyCanvas"></canvas>
         </div>
 
         <div class="controls">
             <div class="control-group">
-                <button class="btn" id="btn-start">Iniciar</button>
-                <button class="btn" id="btn-stop" disabled>Detener</button>
+                <button class="btn" id="btn-start">Start RTA</button>
+                <button class="btn" id="btn-stop" disabled>Stop</button>
                 <button class="btn" id="btn-reset">Reset Peaks</button>
             </div>
 
             <div class="control-group">
-                <label>Muestreo:</label>
+                <label>Tiempo Integ.:</label>
                 <button class="btn active" id="btn-fast">Fast</button>
                 <button class="btn" id="btn-slow">Slow</button>
             </div>
             
             <div class="control-group">
-                <label for="offset-slider">Calibración (+dB):</label>
+                <label for="offset-slider">Ganancia (+dB):</label>
                 <input type="range" id="offset-slider" min="50" max="150" value="100">
                 <span id="offset-val" style="color: var(--neon-green)">100</span>
             </div>
@@ -206,20 +196,26 @@
         let audioContext, mediaStreamSource, analyser, animationId;
         let isRunning = false;
 
-        // Configuraciones de Audio
-        const fftSize = 4096; // Alta resolución
+        const fftSize = 4096;
         let timeDataArray, freqDataArray, peakFreqArray;
-        let dbHistory = [];
-        const maxHistoryLength = 300;
-        let peakDB = -Infinity;
         let smoothedRMS = 0;
-        let sampleRate = 44100; // Por defecto, se actualizará al iniciar
+        let sampleRate = 44100; 
+        
+        // Rango de RTA y Cache Logarítmico
+        const MIN_FREQ = 20; 
+        const MAX_FREQ = 20000;
+        let logXArray = []; // RAM Cache para coordenadas X
+        let spectrumGradient; // Cache para colores
 
         const RESPONSE_FAST = 0.8; 
         const RESPONSE_SLOW = 0.1;
         let currentResponse = RESPONSE_FAST;
 
-        // Elementos DOM
+        // Limitador de FPS (~45 fps para no quemar la CPU)
+        let lastFrameTime = 0;
+        const fpsInterval = 1000 / 45;
+
+        // Elementos del DOM
         const btnStart = document.getElementById('btn-start');
         const btnStop = document.getElementById('btn-stop');
         const btnReset = document.getElementById('btn-reset');
@@ -227,27 +223,50 @@
         const btnSlow = document.getElementById('btn-slow');
         const statusEl = document.getElementById('status');
         const currentDbEl = document.getElementById('current-db');
-        const peakDbEl = document.getElementById('peak-db');
         const domFreqEl = document.getElementById('dom-freq');
         const slider = document.getElementById('offset-slider');
         const offsetVal = document.getElementById('offset-val');
         
-        // Canvas Setup
-        const historyCanvas = document.getElementById('historyCanvas');
-        const histCtx = historyCanvas.getContext('2d');
         const spectrumCanvas = document.getElementById('spectrumCanvas');
         const specCtx = spectrumCanvas.getContext('2d');
         
+        // Función matemática base
+        function getLogX(freq) {
+            const minLog = Math.log10(MIN_FREQ);
+            const maxLog = Math.log10(MAX_FREQ);
+            const freqLog = Math.log10(Math.max(freq, MIN_FREQ));
+            return ((freqLog - minLog) / (maxLog - minLog)) * spectrumCanvas.width;
+        }
+
+        // PRECALCULAR DATOS PESADOS (Optimization)
+        function precomputeData() {
+            if (!analyser) return;
+            const binSize = sampleRate / fftSize;
+            logXArray = new Float32Array(analyser.frequencyBinCount);
+            
+            // Llenar RAM con las coordenadas en vez de calcularlas en vivo
+            for (let i = 0; i < analyser.frequencyBinCount; i++) {
+                logXArray[i] = getLogX(i * binSize);
+            }
+
+            // Preparar el gradiente de color vectorial
+            const graphHeight = spectrumCanvas.height - 25;
+            spectrumGradient = specCtx.createLinearGradient(0, graphHeight, 0, 0);
+            spectrumGradient.addColorStop(0, '#00ff41');   // Verde
+            spectrumGradient.addColorStop(0.7, '#00ff41'); // Verde
+            spectrumGradient.addColorStop(0.85, '#ffea00'); // Amarillo
+            spectrumGradient.addColorStop(1, '#ff003c');   // Rojo
+        }
+
         function resizeCanvases() {
-            const width = historyCanvas.parentElement.clientWidth;
-            historyCanvas.width = width;
-            historyCanvas.height = 200;
-            spectrumCanvas.width = width;
-            spectrumCanvas.height = 220; // Espacio extra abajo para textos
+            spectrumCanvas.width = spectrumCanvas.parentElement.clientWidth;
+            spectrumCanvas.height = 250; 
+            precomputeData(); // Recalcular cache al redimensionar
+            if(!isRunning) drawSpectrumLog(); // Dibujar grilla vacía
         }
         window.addEventListener('resize', resizeCanvases);
-        resizeCanvases();
 
+        // Listeners UI
         let calibrationOffset = parseInt(slider.value);
         slider.addEventListener('input', (e) => {
             calibrationOffset = parseInt(e.target.value);
@@ -255,9 +274,6 @@
         });
 
         btnReset.addEventListener('click', () => {
-            peakDB = -Infinity;
-            peakDbEl.innerText = '--';
-            peakDbEl.classList.remove('warning');
             if(peakFreqArray) peakFreqArray.fill(0);
         });
 
@@ -278,9 +294,8 @@
         async function initAudio() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                sampleRate = audioContext.sampleRate; // Obtener Sample Rate real de la interfaz
+                sampleRate = audioContext.sampleRate; 
                 
                 mediaStreamSource = audioContext.createMediaStreamSource(stream);
                 analyser = audioContext.createAnalyser();
@@ -294,36 +309,45 @@
                 freqDataArray = new Uint8Array(analyser.frequencyBinCount);
                 peakFreqArray = new Uint8Array(analyser.frequencyBinCount);
                 
+                precomputeData(); // Iniciar optimización
+                
                 isRunning = true;
-                statusEl.innerText = '[ ONLINE / TRACKING ]';
+                statusEl.innerText = '[ ONLINE / MIC ACTIVE ]';
                 statusEl.style.color = 'var(--neon-green)';
                 
                 btnStart.disabled = true;
                 btnStop.disabled = false;
                 
-                updateRoutine();
+                requestAnimationFrame(updateRoutine);
                 
             } catch (err) {
                 console.error('Error:', err);
-                alert('Permiso de micrófono denegado. Asegúrate de estar en HTTPS.');
+                alert('Asegúrate de conceder permisos de micrófono.');
             }
         }
 
         function stopAudio() {
             if (audioContext) audioContext.close();
-            cancelAnimationFrame(animationId);
             isRunning = false;
-            
             statusEl.innerText = '[ OFFLINE ]';
             statusEl.style.color = 'var(--text-muted)';
             btnStart.disabled = false;
             btnStop.disabled = true;
         }
 
-        function updateRoutine() {
+        // BUCLE PRINCIPAL
+        function updateRoutine(timestamp) {
             if (!isRunning) return;
+            
+            // Programar el siguiente cuadro
+            requestAnimationFrame(updateRoutine);
 
-            // --- 1. SPL RMS ---
+            // LIMITADOR FPS: Saltar cuadro si es muy rápido
+            const elapsed = timestamp - lastFrameTime;
+            if (elapsed < fpsInterval) return;
+            lastFrameTime = timestamp - (elapsed % fpsInterval);
+
+            // 1. CÁLCULO RMS (Rápido)
             analyser.getFloatTimeDomainData(timeDataArray);
             let sumSquares = 0.0;
             for (let i = 0; i < timeDataArray.length; i++) {
@@ -332,30 +356,19 @@
             let currentRMS = Math.sqrt(sumSquares / timeDataArray.length);
             smoothedRMS = (currentRMS * currentResponse) + (smoothedRMS * (1 - currentResponse));
 
-            let dbValue = 0;
-            if (smoothedRMS > 0) {
-                dbValue = 20 * Math.log10(smoothedRMS) + calibrationOffset;
-            }
+            let dbValue = smoothedRMS > 0 ? 20 * Math.log10(smoothedRMS) + calibrationOffset : 0;
             if (dbValue < 0) dbValue = 0;
-            if (dbValue > peakDB) peakDB = dbValue;
-
-            currentDbEl.innerText = dbValue.toFixed(1);
-            peakDbEl.innerText = peakDB.toFixed(1);
             
-            if (dbValue > 95) currentDbEl.classList.add('warning');
-            else currentDbEl.classList.remove('warning');
-            if (peakDB > 95) peakDbEl.classList.add('warning');
+            // Modificación rápida del DOM mediante toggle (más óptimo)
+            currentDbEl.innerText = dbValue.toFixed(1);
+            currentDbEl.classList.toggle('warning', dbValue > 95);
 
-            dbHistory.push(dbValue);
-            if (dbHistory.length > maxHistoryLength) dbHistory.shift();
-
-            // --- 2. FFT FRECUENCIAS Y CAZADOR DE ACOPLES ---
+            // 2. BÚSQUEDA DE FRECUENCIA DOMINANTE
             analyser.getByteFrequencyData(freqDataArray);
             
             let maxFreqVal = 0;
             let dominantIndex = 0;
             
-            // Buscar la banda con la señal más fuerte
             for (let i = 0; i < analyser.frequencyBinCount; i++) {
                 if (freqDataArray[i] > maxFreqVal) {
                     maxFreqVal = freqDataArray[i];
@@ -363,134 +376,127 @@
                 }
             }
 
-            // Calcular Hz reales: Frecuencia = (Indice * Frecuencia de Muestreo) / FFT Size
             const binSize = sampleRate / fftSize;
             const dominantFrequency = dominantIndex * binSize;
 
-            // Actualizar interfaz solo si hay sonido significativo (para evitar leer ruido de fondo)
-            if (maxFreqVal > 50) { 
+            if (maxFreqVal > 80 && dominantFrequency > MIN_FREQ) { 
                 domFreqEl.innerText = Math.round(dominantFrequency) + " Hz";
-                if (maxFreqVal > 220) { // Si satura, poner rojo
-                    domFreqEl.classList.remove('alert-freq');
-                    domFreqEl.classList.add('warning');
-                } else {
-                    domFreqEl.classList.add('alert-freq');
-                    domFreqEl.classList.remove('warning');
-                }
+                domFreqEl.classList.toggle('warning', maxFreqVal > 220);
+                domFreqEl.classList.toggle('alert-freq', maxFreqVal <= 220);
             } else {
                 domFreqEl.innerText = "-- Hz";
                 domFreqEl.classList.remove('warning');
                 domFreqEl.classList.add('alert-freq');
             }
 
-            drawHistory();
-            drawSpectrum();
-
-            animationId = requestAnimationFrame(updateRoutine);
+            // 3. RENDERIZADO VISUAL
+            drawSpectrumLog();
         }
 
-        function drawHistory() {
-            histCtx.fillStyle = '#000';
-            histCtx.fillRect(0, 0, historyCanvas.width, historyCanvas.height);
-            if (dbHistory.length === 0) return;
-
-            histCtx.strokeStyle = '#222';
-            histCtx.lineWidth = 1;
-            histCtx.beginPath();
-            for (let i = 0; i < historyCanvas.height; i += 40) {
-                histCtx.moveTo(0, i);
-                histCtx.lineTo(historyCanvas.width, i);
-            }
-            histCtx.stroke();
-
-            histCtx.beginPath();
-            histCtx.lineWidth = 2;
-            const sliceWidth = historyCanvas.width / maxHistoryLength;
-            let x = 0;
-
-            for (let i = 0; i < dbHistory.length; i++) {
-                const db = dbHistory[i];
-                const y = historyCanvas.height - (db / 130) * historyCanvas.height;
-                if (i === 0) histCtx.moveTo(x, y);
-                else histCtx.lineTo(x, y);
-                histCtx.strokeStyle = db > 95 ? 'var(--neon-red)' : 'var(--neon-green)';
-                x += sliceWidth;
-            }
-            histCtx.stroke();
-        }
-
-        function drawSpectrum() {
+        // MOTOR DE DIBUJO OPTIMIZADO
+        function drawSpectrumLog() {
             specCtx.fillStyle = '#000';
             specCtx.fillRect(0, 0, spectrumCanvas.width, spectrumCanvas.height);
             
-            const binCount = Math.floor(analyser.frequencyBinCount * 0.7); // Renderizar hasta ~15kHz
-            const barWidth = spectrumCanvas.width / binCount;
-            let x = 0;
-            
-            // Área de dibujo (dejamos 20px abajo para texto)
-            const graphHeight = spectrumCanvas.height - 20;
+            const graphHeight = spectrumCanvas.height - 25; 
 
-            for (let i = 0; i < binCount; i++) {
-                const value = freqDataArray[i];
-                
-                if (value > peakFreqArray[i]) peakFreqArray[i] = value;
-                else peakFreqArray[i] = Math.max(0, peakFreqArray[i] - 1.5);
-
-                const percent = value / 255;
-                const height = percent * graphHeight;
-                const y = graphHeight - height;
-                
-                specCtx.fillStyle = value > 220 ? 'var(--neon-red)' : 'var(--neon-green)';
-                specCtx.globalAlpha = 0.8;
-                specCtx.fillRect(x, y, barWidth > 1 ? barWidth - 0.5 : 1, height);
-                specCtx.globalAlpha = 1.0;
-
-                const peakPercent = peakFreqArray[i] / 255;
-                const peakY = graphHeight - (peakPercent * graphHeight);
-                specCtx.fillStyle = 'var(--neon-blue)';
-                specCtx.fillRect(x, peakY, barWidth > 1 ? barWidth - 0.5 : 1, 2);
-
-                x += barWidth;
-            }
-
-            // --- DIBUJAR MARCADORES DE FRECUENCIA (Eje X) ---
+            // -- GUIAS DE FONDO --
+            specCtx.beginPath();
+            specCtx.strokeStyle = '#222';
+            specCtx.lineWidth = 1;
             specCtx.fillStyle = '#666';
             specCtx.font = '10px Courier New';
             specCtx.textAlign = 'center';
-            
-            // Calcular cuantas frecuencias abarca el ancho total del canvas
-            const maxDisplayFreq = binCount * (sampleRate / fftSize);
-            
-            // Frecuencias de referencia a marcar
-            const referenceFreqs = [250, 1000, 3000, 5000, 10000];
-            const labels = ['250Hz', '1kHz', '3kHz', '5kHz', '10kHz'];
 
-            specCtx.beginPath();
-            specCtx.strokeStyle = '#333';
-            specCtx.lineWidth = 1;
+            const referenceFreqs = [60, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+            const labels = ['60', '125', '250', '500', '1k', '2k', '4k', '8k', '16k'];
 
             for(let j=0; j<referenceFreqs.length; j++) {
-                let freq = referenceFreqs[j];
-                // Posición X = (Frecuencia objetivo / Frecuencia máxima visible) * Ancho
-                let posX = (freq / maxDisplayFreq) * spectrumCanvas.width;
-                
-                if (posX < spectrumCanvas.width) {
-                    // Linea vertical tenue
-                    specCtx.moveTo(posX, 0);
-                    specCtx.lineTo(posX, graphHeight);
-                    
-                    // Texto
-                    specCtx.fillText(labels[j], posX, spectrumCanvas.height - 5);
-                }
+                // Para las guias seguimos usando la función porque son pocas
+                let posX = getLogX(referenceFreqs[j]);
+                specCtx.moveTo(posX, 0);
+                specCtx.lineTo(posX, graphHeight);
+                specCtx.fillText(labels[j], posX, spectrumCanvas.height - 5);
             }
             specCtx.stroke();
+
+            if (!isRunning) return; // Si está apagado, terminar aquí
+
+            const binSize = sampleRate / fftSize;
+
+            // -- DIBUJO DE ONDA CONTINUA (BATCHING) --
+            specCtx.fillStyle = spectrumGradient;
+            specCtx.beginPath();
+            specCtx.moveTo(0, graphHeight); // Empezar trazado
+            
+            let peakPath = new Path2D(); // Trazado separado para la línea azul
+            let isFirstPeakPoint = true;
+            
+            let lastX = -1;
+            let bucketVal = 0;
+            let bucketPeak = 0;
+            
+            for (let i = 1; i < analyser.frequencyBinCount; i++) {
+                const hz = i * binSize;
+                if (hz < MIN_FREQ || hz > MAX_FREQ) continue;
+
+                const value = freqDataArray[i];
+                
+                // Actualizar Peak Hold
+                if (value > peakFreqArray[i]) peakFreqArray[i] = value;
+                else peakFreqArray[i] = Math.max(0, peakFreqArray[i] - 1.5);
+
+                // Agrupación (Binning) por píxel X de la pantalla
+                const x = Math.round(logXArray[i]);
+                
+                if (x === lastX) {
+                    // Si varias frecuencias caen en el mismo píxel, tomamos la más fuerte
+                    if (value > bucketVal) bucketVal = value;
+                    if (peakFreqArray[i] > bucketPeak) bucketPeak = peakFreqArray[i];
+                } else {
+                    // Si cambiamos de píxel, dibujamos el resultado del píxel anterior
+                    if (lastX !== -1) {
+                        const h = (bucketVal / 255) * graphHeight;
+                        specCtx.lineTo(lastX, graphHeight - h);
+                        
+                        const ph = (bucketPeak / 255) * graphHeight;
+                        if (isFirstPeakPoint) {
+                            peakPath.moveTo(lastX, graphHeight - ph);
+                            isFirstPeakPoint = false;
+                        } else {
+                            peakPath.lineTo(lastX, graphHeight - ph);
+                        }
+                    }
+                    // Reiniciar acumulador
+                    lastX = x;
+                    bucketVal = value;
+                    bucketPeak = peakFreqArray[i];
+                }
+            }
+            
+            // Completar el último punto
+            if (lastX !== -1) {
+                const h = (bucketVal / 255) * graphHeight;
+                specCtx.lineTo(lastX, graphHeight - h);
+                const ph = (bucketPeak / 255) * graphHeight;
+                peakPath.lineTo(lastX, graphHeight - ph);
+            }
+            
+            // Cerrar el polígono de espectro
+            specCtx.lineTo(lastX, graphHeight); 
+            specCtx.fill(); // Rellenar todo de un solo golpe GPU
+            
+            // Pintar la línea de Picos (Hold)
+            specCtx.strokeStyle = '#00e5ff'; // neon-blue
+            specCtx.lineWidth = 1.5;
+            specCtx.stroke(peakPath);
         }
 
         btnStart.addEventListener('click', initAudio);
         btnStop.addEventListener('click', stopAudio);
         
-        drawHistory();
-        drawSpectrum();
+        // Inicializar vistas
+        resizeCanvases();
     </script>
 </body>
 </html>
